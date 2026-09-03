@@ -1,0 +1,19 @@
+# Environment variables - NEVER commit these!
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Test files with potential secrets
+test_*.py
+*_test.py
+
+# Python
+venv/
+actibosst/
+__pycache__/
+*.pyc
+logs/
+data/
+reports/
+*.log
