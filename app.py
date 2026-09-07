@@ -1,4 +1,8 @@
 # app.py
+import os
+import subprocess
+from pathlib import Path
+
 import streamlit as st
 import requests
 import json
@@ -213,6 +217,92 @@ if "last_route" not in st.session_state:
     st.session_state.last_route = "unknown"
 if "last_classification" not in st.session_state:
     st.session_state.last_classification = "unknown"
+if "voice_mode" not in st.session_state:
+    st.session_state.voice_mode = False
+if "last_speech_text" not in st.session_state:
+    st.session_state.last_speech_text = ""
+if "session_start_attempted" not in st.session_state:
+    st.session_state.session_start_attempted = False
+
+
+def get_api_base_url() -> str:
+    candidates = [
+        "http://localhost:8003",
+        "http://localhost:8000",
+        "http://localhost:8001",
+        "http://localhost:8002",
+    ]
+
+    for url in candidates:
+        try:
+            response = requests.get(f"{url}/", timeout=1.5)
+            if response.status_code < 500:
+                return url
+        except Exception:
+            continue
+
+    project_root = Path(__file__).resolve().parent
+    venv_python = project_root / "actibosst" / "Scripts" / "python.exe"
+    if venv_python.exists():
+        subprocess.Popen(
+            [
+                str(venv_python),
+                "-m",
+                "uvicorn",
+                "src.api.main:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "8003",
+            ],
+            cwd=str(project_root),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+
+        for _ in range(25):
+            time.sleep(0.8)
+            for url in candidates:
+                try:
+                    response = requests.get(f"{url}/", timeout=1.5)
+                    if response.status_code < 500:
+                        return url
+                except Exception:
+                    continue
+
+    return "http://localhost:8003"
+
+
+def start_session_automatically():
+    api_url = get_api_base_url()
+    try:
+        response = requests.post(
+            f"{api_url}/api/session/start",
+            params={"student_id": "web_user", "exam_id": "negotiation"},
+            timeout=15,
+        )
+        if response.status_code == 200:
+            data = response.json()
+            st.session_state.session_id = data.get("session_id")
+            st.session_state.started = True
+            st.session_state.phase = "active"
+            st.session_state.deal_form_open = False
+            st.session_state.messages = []
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": normalize_chat_text(data.get("welcome_message") or "🏗️ Welcome to Actiboost AI Negotiator! I'm here to help you with your construction needs. What can I assist you with today?"),
+                "timestamp": datetime.now().strftime("%H:%M:%S"),
+                "route": "conversational",
+                "classification": "conversational",
+            })
+            return True
+
+        st.error(f"❌ Could not start session: {response.text}")
+        return False
+    except Exception as exc:
+        st.error(f"❌ Connection error: {exc}")
+        return False
 
 
 def render_route_tag(route: str, classification: str) -> str:
@@ -286,6 +376,164 @@ def detect_final_deal_request(text: str) -> bool:
         return True
     return False
 
+
+def last_assistant_text() -> str:
+    for msg in reversed(st.session_state.messages):
+        if msg.get("role") == "assistant":
+            return normalize_chat_text(msg.get("content", ""))
+    return ""
+
+
+def get_voice_summary(text: str) -> str:
+    if not text:
+        return ""
+
+    cleaned = normalize_chat_text(text)
+    lower = cleaned.lower()
+    if "|" in cleaned or "1 bhk" in lower or "2 bhk" in lower or "area" in lower and "price" in lower:
+        return "Please check the table below in the chat window for the details."
+
+    short = cleaned.replace("\n", " ").strip()
+    if len(short) > 180:
+        short = short[:180].rsplit(" ", 1)[0] + "..."
+    return short
+
+
+def render_chat_auto_scroll() -> None:
+    st.components.v1.html(
+        """
+        <script>
+        try {
+            const chatShell = document.querySelector('.chat-shell');
+            if (chatShell) {
+                chatShell.scrollTop = chatShell.scrollHeight;
+            }
+        } catch (e) {}
+        </script>
+        """,
+        height=0,
+        scrolling=False,
+    )
+
+
+def render_voice_reply_button() -> None:
+    raw_text = last_assistant_text()
+    if not raw_text:
+        return
+
+    speech_text = get_voice_summary(raw_text)
+    if not speech_text:
+        return
+
+    if st.button("🔊 Speak Reply", key="voice_reply_button", help="Speak the latest assistant reply"):
+        st.session_state.last_speech_text = speech_text
+        safe_text = speech_text.replace("'", "\\'").replace("\n", " ")
+        st.components.v1.html(
+            f"""
+            <script>
+            try {{
+                const speech = new SpeechSynthesisUtterance({safe_text!r});
+                speech.lang = 'en-IN';
+                speech.rate = 1.0;
+                speech.pitch = 1.0;
+                window.speechSynthesis.cancel();
+                window.speechSynthesis.speak(speech);
+            }} catch (e) {{}}
+            </script>
+            """,
+            height=0,
+            scrolling=False,
+        )
+
+
+def render_chat_autoscroll_and_voice() -> None:
+    render_chat_auto_scroll()
+    render_voice_reply_button()
+
+
+def render_voice_mic_widget() -> None:
+    st.components.v1.html(
+        """
+        <div style="margin: 0 0 18px 0; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <button id="voiceChatButton" style="background:linear-gradient(135deg,#2563eb,#1d4ed8); color:#fff; border:none; border-radius:12px; padding:11px 18px; font-weight:800; cursor:pointer; box-shadow:0 8px 20px rgba(37,99,235,0.25);">🎤 Voice Input</button>
+          <span id="voiceStatus" style="color:#475569; font-size:0.9rem; font-weight:600;">Ready</span>
+        </div>
+        <script>
+        const voiceButton = document.getElementById('voiceChatButton');
+        const status = document.getElementById('voiceStatus');
+        let recognition = null;
+
+        function setTextareaValue(text) {
+            const textarea = document.querySelector('textarea[aria-label="Type your message"], textarea');
+            if (!textarea) return false;
+            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+            nativeSetter.call(textarea, text);
+            textarea.dispatchEvent(new Event('input', { bubbles: true }));
+            textarea.dispatchEvent(new Event('change', { bubbles: true }));
+            textarea.focus();
+            return true;
+        }
+
+        if (voiceButton) {
+            voiceButton.addEventListener('click', () => {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if (!SpeechRecognition) {
+                    status.textContent = 'Speech is not supported in this browser.';
+                    return;
+                }
+
+                if (recognition) {
+                    recognition.stop();
+                    recognition = null;
+                    voiceButton.textContent = '🎤 Voice Input';
+                    status.textContent = 'Stopped';
+                    return;
+                }
+
+                recognition = new SpeechRecognition();
+                recognition.lang = 'en-IN';
+                recognition.continuous = false;
+                recognition.interimResults = false;
+                recognition.maxAlternatives = 1;
+                voiceButton.textContent = '⏹ Stop';
+                status.textContent = 'Listening...';
+
+                recognition.onresult = (event) => {
+                    const transcript = event.results[0][0].transcript;
+                    if (setTextareaValue(transcript)) {
+                        status.textContent = 'Captured';
+                    } else {
+                        status.textContent = 'Input box not found. Refresh the page and try again.';
+                    }
+                };
+
+                recognition.onerror = () => {
+                    status.textContent = 'Microphone access is blocked or unavailable.';
+                    voiceButton.textContent = '🎤 Voice Input';
+                    recognition = null;
+                };
+
+                recognition.onend = () => {
+                    status.textContent = 'Ready';
+                    voiceButton.textContent = '🎤 Voice Input';
+                    recognition = null;
+                };
+
+                try {
+                    recognition.start();
+                } catch (err) {
+                    status.textContent = 'Microphone is busy. Please try again.';
+                    voiceButton.textContent = '🎤 Voice Input';
+                    recognition = null;
+                }
+            });
+        }
+        </script>
+        """,
+        height=120,
+        scrolling=False,
+    )
+
 # ==================== HEADER ====================
 st.markdown("""
 <div class="topbar">
@@ -300,33 +548,17 @@ with st.sidebar:
     
     # Session Controls
     if not st.session_state.started:
+        if not st.session_state.session_start_attempted:
+            st.session_state.session_start_attempted = True
+            with st.spinner("🔄 Starting session automatically..."):
+                if start_session_automatically():
+                    st.rerun()
+
         if st.button("🚀 Start New Session", width="stretch", type="primary"):
+            st.session_state.session_start_attempted = False
             with st.spinner("🔄 Starting session..."):
-                try:
-                    response = requests.post(
-                        "http://localhost:8000/api/session/start",
-                        params={"student_id": "web_user", "exam_id": "negotiation"},
-                        timeout=10
-                    )
-                    if response.status_code == 200:
-                        data = response.json()
-                        st.session_state.session_id = data.get("session_id")
-                        st.session_state.started = True
-                        st.session_state.phase = "active"
-                        st.session_state.deal_form_open = False
-                        st.session_state.messages = []
-                        st.session_state.messages.append({
-                            "role": "assistant",
-                            "content": normalize_chat_text("🏗️ Welcome to Actiboost AI Negotiator! I'm here to help you with your construction needs. What can I assist you with today?"),
-                            "timestamp": datetime.now().strftime("%H:%M:%S"),
-                            "route": "conversational",
-                            "classification": "conversational",
-                        })
-                        st.rerun()
-                    else:
-                        st.error(f"❌ Error: {response.text}")
-                except Exception as e:
-                    st.error(f"❌ Connection error: {e}")
+                if start_session_automatically():
+                    st.rerun()
     else:
         st.success(f"✅ Session Active")
         st.info(f"🆔 ID: {st.session_state.session_id[:8]}...")
@@ -418,7 +650,7 @@ with st.sidebar:
 if st.session_state.started:
     if st.button("📋 View Saved Deals", key="top_view_saved_deals", width="stretch"):
         try:
-            response = requests.get("http://localhost:8000/api/deals", timeout=15)
+            response = requests.get(f"{get_api_base_url()}/api/deals", timeout=15)
             if response.status_code == 200:
                 st.session_state.saved_deals = response.json()
                 if st.session_state.saved_deals:
@@ -439,7 +671,12 @@ if st.session_state.started:
 
     # Chat container
     st.markdown("<div class='chat-shell'>", unsafe_allow_html=True)
-    for msg in st.session_state.messages:
+    last_assistant_index = max(
+        (i for i, msg in enumerate(st.session_state.messages) if msg.get("role") == "assistant"),
+        default=-1,
+    )
+
+    for idx, msg in enumerate(st.session_state.messages):
         if msg["role"] == "user":
             with st.chat_message("user"):
                 st.write(normalize_chat_text(msg["content"]))
@@ -451,8 +688,11 @@ if st.session_state.started:
                 st.caption(render_route_tag(route, classification))
                 st.write(normalize_chat_text(msg["content"]))
                 st.caption(f"🕐 {msg.get('timestamp', '')}")
+                if idx == last_assistant_index:
+                    render_voice_reply_button()
     st.markdown("</div>", unsafe_allow_html=True)
-    
+    render_chat_auto_scroll()
+
     show_final_deal_form = st.session_state.deal_form_open
 
     if show_final_deal_form:
@@ -491,7 +731,7 @@ if st.session_state.started:
                 }
                 try:
                     response = requests.post(
-                        "http://localhost:8000/api/deal/create",
+                        f"{get_api_base_url()}/api/deal/create",
                         json=payload,
                         timeout=15
                     )
@@ -552,7 +792,7 @@ if st.session_state.started:
         with st.spinner("🤔 Thinking..."):
             try:
                 response = requests.post(
-                    f"http://localhost:8000/api/session/{st.session_state.session_id}/message",
+                    f"{get_api_base_url()}/api/session/{st.session_state.session_id}/message",
                     json={"message": question},
                     timeout=30
                 )
@@ -577,29 +817,30 @@ if st.session_state.started:
             except Exception as e:
                 st.error(f"❌ Error: {e}")
     
-    # Chat input
-    if prompt := st.chat_input("💬 Ask about construction, flats, pricing..."):
-        if detect_final_deal_request(prompt):
+    render_voice_mic_widget()
+
+    prompt = st.chat_input("💬 Ask about construction, flats, pricing...")
+    if prompt:
+        user_prompt = prompt.strip()
+        if detect_final_deal_request(user_prompt):
             st.session_state.deal_form_open = True
         else:
             st.session_state.deal_form_open = False
 
-        # Add user message
         st.session_state.messages.append({
             "role": "user",
-            "content": normalize_chat_text(prompt),
+            "content": normalize_chat_text(user_prompt),
             "timestamp": datetime.now().strftime("%H:%M:%S")
         })
-        
-        # Process
+
         with st.spinner("🤔 Analyzing..."):
             try:
                 response = requests.post(
-                    f"http://localhost:8000/api/session/{st.session_state.session_id}/message",
-                    json={"message": prompt},
+                    f"{get_api_base_url()}/api/session/{st.session_state.session_id}/message",
+                    json={"message": user_prompt},
                     timeout=30
                 )
-                
+
                 if response.status_code == 200:
                     data = response.json()
                     assistant_message = data.get("response", "I'm thinking about that...")
@@ -608,7 +849,7 @@ if st.session_state.started:
                     st.session_state.message_count = data.get("message_count", 0)
                     st.session_state.last_route = data.get("route", st.session_state.last_route)
                     st.session_state.last_classification = data.get("classification", st.session_state.last_classification)
-                    
+
                     st.session_state.messages.append({
                         "role": "assistant",
                         "content": assistant_message,
@@ -616,9 +857,9 @@ if st.session_state.started:
                         "route": data.get("route", st.session_state.last_route),
                         "classification": data.get("classification", st.session_state.last_classification),
                     })
-                    
+
                     st.rerun()
-                    
+
             except requests.exceptions.Timeout:
                 st.error("⏰ Request timed out. Please try again.")
             except Exception as e:

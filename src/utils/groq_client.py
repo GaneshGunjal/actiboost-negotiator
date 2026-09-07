@@ -24,6 +24,18 @@ if env_path.exists():
 
 logger = logging.getLogger(__name__)
 
+
+def _build_rate_limit_fallback(prompt: str, model: str) -> str:
+    prompt_text = (prompt or "").strip()
+    if len(prompt_text) > 180:
+        prompt_text = prompt_text[:177] + "..."
+    return (
+        "I’m temporarily unable to reach the AI model because the Groq rate limit has been reached. "
+        "Please try again in a moment, and I’ll continue with your construction or negotiation query. "
+        f"Recent request: '{prompt_text}'"
+    )
+
+
 class GroqClient:
     def __init__(self):
         self.api_key = os.getenv("GROQ_API_KEY")
@@ -64,22 +76,31 @@ class GroqClient:
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
-        
-        response = await self.client.post(
-            f"{self.base_url}/chat/completions",
-            json={
-                "model": self.model,
-                "messages": messages,
-                "temperature": temperature or self.temperature,
-                "max_tokens": 4096
-            }
-        )
-        
+
+        try:
+            response = await self.client.post(
+                f"{self.base_url}/chat/completions",
+                json={
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": temperature or self.temperature,
+                    "max_tokens": 4096
+                }
+            )
+        except Exception as exc:
+            logger.warning("Groq request failed: %s", exc)
+            return _build_rate_limit_fallback(prompt, self.model)
+
         if response.status_code == 200:
             data = response.json()
             return data["choices"][0]["message"]["content"]
-        else:
-            raise Exception(f"GROQ API error: {response.text}")
+
+        body_text = getattr(response, "text", "") or ""
+        if response.status_code == 429 or "rate limit" in (body_text or "").lower():
+            logger.warning("Groq rate limit reached for model %s. Returning fallback reply.", self.model)
+            return _build_rate_limit_fallback(prompt, self.model)
+
+        raise Exception(f"GROQ API error: {body_text}")
     
     async def ask_json(self, prompt: str, system_prompt: Optional[str] = None) -> Dict[str, Any]:
         response = await self.ask(prompt, system_prompt)

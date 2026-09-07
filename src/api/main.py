@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 from src.orchestrator.orchestrator import NegotiationOrchestrator
 from src.models.state import NegotiationState, Message
+from src.checkpoint.checkpointer import SessionCheckpointer
 
 # ========== CREATE APP FIRST ==========
 app = FastAPI(title="Actiboost Negotiation System")
@@ -45,6 +46,7 @@ class HumanApprovalRequest(BaseModel):
 
 # ========== INITIALIZE ==========
 orchestrator = NegotiationOrchestrator()
+checkpoint_store = SessionCheckpointer()
 active_sessions: Dict[str, NegotiationState] = {}
 
 # ========== ROOT ==========
@@ -74,6 +76,7 @@ async def start_session(student_id: str = "web_user", exam_id: str = "negotiatio
         user_id=student_id,
         project_type="unknown"
     )
+    checkpoint_store.save(state.session_id, state.model_dump())
     active_sessions[state.session_id] = state
     
     welcome_message = "🏗️ Welcome to Actiboost AI Negotiator! I'm here to help you with your construction needs. What can I assist you with today?"
@@ -107,6 +110,7 @@ async def send_message(session_id: str, request: MessageRequest):
         return JSONResponse({"error": "Message is required"}, status_code=400)
     
     state = await orchestrator.process_message(state, user_message)
+    checkpoint_store.save(session_id, state.model_dump())
     active_sessions[session_id] = state
     
     assistant_message = None
