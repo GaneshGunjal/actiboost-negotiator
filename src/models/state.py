@@ -26,6 +26,8 @@ class Message(BaseModel):
     content: str
     language: str = "en"
     timestamp: datetime = Field(default_factory=datetime.now)
+    route: Optional[str] = None
+    classification: Optional[str] = None
 
 class NegotiationState(BaseModel):
     """Complete state for the autonomous negotiator"""
@@ -65,6 +67,8 @@ class NegotiationState(BaseModel):
     tokens_used: int = 0
     negotiation_rounds: int = 0
     confidence_score: float = 0.0
+    route: str = "unknown"  # llm, sql_cache, local_guardrail, off_topic
+    last_guardrail: Optional[str] = None
     
     # Checkpoint (for long-term memory)
     checkpoint_id: Optional[str] = None
@@ -73,3 +77,9 @@ class NegotiationState(BaseModel):
     # Golden Dataset Metadata (for evaluation)
     expected_outcome: Optional[str] = None
     ground_truth: Optional[Dict[str, Any]] = None
+
+    negotiation_history: List[Dict[str, Any]] = Field(default_factory=list)
+    current_offer: Optional[float] = None
+    counter_offer: Optional[float] = None
+    deal_status: str = "negotiating"  # negotiating, approved, rejected, completed
+    customer_requirements: Dict[str, Any] = Field(default_factory=dict)

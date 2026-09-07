@@ -3,6 +3,8 @@ import streamlit as st
 import requests
 import json
 import time
+import re
+import html
 from datetime import datetime
 import plotly.graph_objects as go
 import pandas as pd
@@ -19,200 +21,167 @@ st.set_page_config(
 # ==================== CUSTOM CSS ====================
 st.markdown("""
 <style>
-    /* Main container */
+    :root {
+        --bg: #f3f7ff;
+        --panel: #ffffff;
+        --panel-soft: #f8faff;
+        --line: #e6edf7;
+        --text: #0f172a;
+        --muted: #64748b;
+        --primary: #1d4ed8;
+        --primary-dark: #102a6b;
+        --success: #16a34a;
+        --warning: #f59e0b;
+        --danger: #ef4444;
+    }
+
     .main {
-        padding: 0rem 1rem;
+        background: linear-gradient(180deg, #f5f8ff 0%, #eef4ff 100%);
+        padding: 0 1rem 2rem 1rem;
     }
-    
-    /* Header */
-    .header-container {
-        background: linear-gradient(135deg, #1a237e, #0d47a1);
-        padding: 1.5rem 2rem;
-        border-radius: 15px;
-        margin-bottom: 2rem;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-    }
-    .header-title {
-        color: white;
-        font-size: 2.5rem;
-        font-weight: 700;
-        margin: 0;
-    }
-    .header-subtitle {
-        color: rgba(255,255,255,0.8);
-        font-size: 1.1rem;
-        margin: 0;
-    }
-    
-    /* Chat messages */
-    .chat-container {
-        background: #f5f7fa;
-        border-radius: 15px;
-        padding: 1.5rem;
-        height: 500px;
-        overflow-y: auto;
-        border: 1px solid #e8ecf1;
+
+    .topbar {
+        background: linear-gradient(135deg, #0f172a 0%, #172554 100%);
+        padding: 1.1rem 1.5rem;
+        border-radius: 18px;
         margin-bottom: 1rem;
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
     }
-    
-    .message-user {
-        background: linear-gradient(135deg, #e3f2fd, #bbdefb);
-        padding: 0.8rem 1.2rem;
-        border-radius: 18px 18px 4px 18px;
-        margin: 0.5rem 0;
-        max-width: 80%;
-        align-self: flex-end;
-        float: right;
-        clear: both;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+
+    .topbar h1 {
+        margin: 0;
+        color: #ffffff;
+        font-size: 2.1rem;
+        font-weight: 800;
+        letter-spacing: -0.04em;
     }
-    
-    .message-assistant {
-        background: black;
-        padding: 0.8rem 1.2rem;
-        border-radius: 18px 18px 18px 4px;
-        margin: 0.5rem 0;
-        max-width: 80%;
-        align-self: flex-start;
-        float: left;
-        clear: both;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-        border: 1px solid #e8ecf1;
+
+    .topbar p {
+        margin: 0.3rem 0 0 0;
+        color: rgba(255,255,255,0.8);
+        font-size: 0.98rem;
     }
-    
-    .message-time {
-        font-size: 0.7rem;
-        color: #888;
-        margin-top: 0.2rem;
+
+    .status-strip {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+        align-items: center;
+        justify-content: space-between;
+        background: rgba(255,255,255,0.75);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 0.75rem 1rem;
+        margin: 0.75rem 0 1rem 0;
+        box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
     }
-    
-    /* Sidebar */
-    .sidebar-container {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 15px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+
+    .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        background: #eef2ff;
+        color: var(--primary-dark);
+        padding: 0.38rem 0.7rem;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 700;
     }
-    
+
     .metric-card {
-        background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+        background: linear-gradient(180deg, #ffffff 0%, #f8faff 100%);
+        border: 1px solid var(--line);
+        border-radius: 14px;
         padding: 1rem;
-        border-radius: 12px;
         text-align: center;
-        margin: 0.5rem 0;
-        border-left: 4px solid #1a237e;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.03);
     }
+
     .metric-value {
         font-size: 1.8rem;
-        font-weight: 700;
-        color: #1a237e;
+        font-weight: 800;
+        color: var(--primary-dark);
+        margin-bottom: 0.2rem;
     }
+
     .metric-label {
-        font-size: 0.8rem;
-        color: #666;
-        margin-top: 0.2rem;
+        font-size: 0.78rem;
+        color: var(--muted);
+        font-weight: 700;
     }
-    
-    /* Buttons */
-    .btn-primary {
-        background: linear-gradient(135deg, #1a237e, #0d47a1);
+
+    .chat-shell {
+        background: rgba(255,255,255,0.65);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+        padding: 0.7rem 0.7rem 0.25rem 0.7rem;
+    }
+
+    .message-bubble-user {
+        background: linear-gradient(135deg, #2563eb, #1d4ed8);
         color: white;
-        border: none;
-        padding: 0.6rem 1.5rem;
-        border-radius: 25px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.3s;
-        width: 100%;
+        border-radius: 18px 18px 6px 18px;
+        padding: 0.85rem 1rem 0.75rem 1rem;
+        margin: 0.55rem 0;
+        max-width: 78%;
+        margin-left: auto;
+        box-shadow: 0 10px 24px rgba(37, 99, 235, 0.18);
     }
-    .btn-primary:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 15px rgba(26,35,126,0.3);
+
+    .message-bubble-assistant {
+        background: linear-gradient(180deg, #ffffff 0%, #f8faff 100%);
+        color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 18px 18px 18px 6px;
+        padding: 0.85rem 1rem 0.75rem 1rem;
+        margin: 0.6rem 0;
+        max-width: 82%;
+        box-shadow: 0 10px 18px rgba(15, 23, 42, 0.04);
     }
-    .btn-danger {
-        background: linear-gradient(135deg, #c62828, #b71c1c);
-        color: white;
-        border: none;
-        padding: 0.6rem 1.5rem;
-        border-radius: 25px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.3s;
-        width: 100%;
+
+    .meta-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        font-weight: 700;
+        font-size: 0.7rem;
+        letter-spacing: 0.02em;
+        border-radius: 999px;
+        padding: 0.3rem 0.6rem;
+        margin-bottom: 0.45rem;
+        background: #ecfdf5;
+        color: #166534;
     }
-    .btn-danger:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 15px rgba(198,40,40,0.3);
+
+    .meta-badge.route {
+        background: #eef2ff;
+        color: #3730a3;
     }
-    
-    /* Quick questions */
-    .quick-btn {
-        background: #f0f2f6;
-        border: 1px solid #ddd;
-        padding: 0.5rem 1rem;
-        border-radius: 20px;
-        font-size: 0.85rem;
-        cursor: pointer;
-        transition: all 0.2s;
-        margin: 0.2rem 0;
-        width: 100%;
-        text-align: left;
-    }
-    .quick-btn:hover {
-        background: #e3f2fd;
-        border-color: #1a237e;
-        transform: translateX(5px);
-    }
-    
-    /* Status badge */
-    .status-badge {
-        padding: 0.25rem 0.75rem;
-        border-radius: 20px;
-        font-weight: 600;
-        font-size: 0.8rem;
-        display: inline-block;
-    }
-    .status-active {
-        background: #4caf50;
-        color: white;
-    }
-    .status-research {
-        background: #ff9800;
-        color: white;
-    }
-    .status-completed {
-        background: #2196f3;
-        color: white;
-    }
-    .status-idle {
-        background: #9e9e9e;
-        color: white;
-    }
-    
-    /* Footer */
+
     .footer {
         text-align: center;
-        color: #999;
+        color: #64748b;
         font-size: 0.8rem;
-        margin-top: 2rem;
+        margin-top: 1.4rem;
         padding-top: 1rem;
-        border-top: 1px solid #eee;
+        border-top: 1px solid rgba(148, 163, 184, 0.25);
     }
-    
-    /* Scrollbar */
+
     ::-webkit-scrollbar {
-        width: 6px;
+        width: 8px;
     }
     ::-webkit-scrollbar-track {
-        background: #f1f1f1;
+        background: #f1f5f9;
         border-radius: 10px;
     }
     ::-webkit-scrollbar-thumb {
-        background: #c1c1c1;
+        background: #cbd5e1;
         border-radius: 10px;
     }
     ::-webkit-scrollbar-thumb:hover {
-        background: #a1a1a1;
+        background: #94a3b8;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -232,12 +201,96 @@ if "violations" not in st.session_state:
     st.session_state.violations = 0
 if "message_count" not in st.session_state:
     st.session_state.message_count = 0
+if "saved_deals" not in st.session_state:
+    st.session_state.saved_deals = []
+if "deal_saved_message" not in st.session_state:
+    st.session_state.deal_saved_message = ""
+if "last_saved_deal" not in st.session_state:
+    st.session_state.last_saved_deal = None
+if "deal_form_open" not in st.session_state:
+    st.session_state.deal_form_open = False
+if "last_route" not in st.session_state:
+    st.session_state.last_route = "unknown"
+if "last_classification" not in st.session_state:
+    st.session_state.last_classification = "unknown"
+
+
+def render_route_tag(route: str, classification: str) -> str:
+    route_map = {
+        "llm": "LLM",
+        "sql_cache": "SQL Cache",
+        "local_guardrail": "Local Guardrail",
+        "off_topic": "Off Topic",
+        "unknown": "Unknown",
+    }
+    classification_map = {
+        "conversational": "Conversational",
+        "technical": "Technical",
+        "low_intent": "Low Intent",
+        "off_topic": "Off Topic",
+        "unknown": "Unknown",
+    }
+    route_text = route_map.get((route or "unknown").lower(), (route or "unknown").replace("_", " ").title())
+    classification_text = classification_map.get((classification or "unknown").lower(), (classification or "unknown").replace("_", " ").title())
+    return f"🧠 {classification_text}  •  🔀 {route_text}"
+
+
+def normalize_chat_text(raw_text: str) -> str:
+    if raw_text is None:
+        return ""
+    text = html.unescape(str(raw_text))
+    text = re.sub(r"(?is)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?is)<(script|style|svg|img|iframe)[^>]*>.*?</\1>", "", text)
+    text = re.sub(r"(?is)<[^>]+>", "", text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = html.escape(text, quote=False)
+    return text.strip()
+
+
+def escape_message_html(raw_text: str) -> str:
+    text = normalize_chat_text(raw_text)
+    return text.replace("\n", "<br>")
+
+
+def detect_final_deal_request(text: str) -> bool:
+    normalized = (text or "").lower().strip()
+    triggers = [
+        "book the deal",
+        "book this deal",
+        "book on",
+        "book at",
+        "book for",
+        "okay then book",
+        "okay then finalize",
+        "i am okay with the price",
+        "i am okay with this price",
+        "i am ok with the price",
+        "i am okay with",
+        "i am ok with",
+        "i agree to the price",
+        "i accept the deal",
+        "accept the deal",
+        "confirm the deal",
+        "close the deal",
+        "finalize the deal",
+        "go ahead with the deal",
+        "okay then deal",
+        "book the flat",
+        "book this flat",
+    ]
+    if any(trigger in normalized for trigger in triggers):
+        return True
+    if "book" in normalized and ("lakh" in normalized or "price" in normalized or "deal" in normalized):
+        return True
+    if "okay" in normalized and ("book" in normalized or "deal" in normalized or "price" in normalized):
+        return True
+    return False
 
 # ==================== HEADER ====================
-st.markdown(f"""
-<div class="header-container">
-    <h1 class="header-title">🏗️ Actiboost AI Negotiator</h1>
-    <p class="header-subtitle">🚀 Intelligent Construction & Real Estate Assistant</p>
+st.markdown("""
+<div class="topbar">
+    <h1>🏗️ Actiboost AI Negotiator</h1>
+    <p>Intelligent construction and real-estate negotiation assistant</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -247,7 +300,7 @@ with st.sidebar:
     
     # Session Controls
     if not st.session_state.started:
-        if st.button("🚀 Start New Session", use_container_width=True, type="primary"):
+        if st.button("🚀 Start New Session", width="stretch", type="primary"):
             with st.spinner("🔄 Starting session..."):
                 try:
                     response = requests.post(
@@ -260,11 +313,14 @@ with st.sidebar:
                         st.session_state.session_id = data.get("session_id")
                         st.session_state.started = True
                         st.session_state.phase = "active"
+                        st.session_state.deal_form_open = False
                         st.session_state.messages = []
                         st.session_state.messages.append({
                             "role": "assistant",
-                            "content": "🏗️ Welcome to Actiboost AI Negotiator! I'm here to help you with your construction needs. What can I assist you with today?",
-                            "timestamp": datetime.now().strftime("%H:%M:%S")
+                            "content": normalize_chat_text("🏗️ Welcome to Actiboost AI Negotiator! I'm here to help you with your construction needs. What can I assist you with today?"),
+                            "timestamp": datetime.now().strftime("%H:%M:%S"),
+                            "route": "conversational",
+                            "classification": "conversational",
                         })
                         st.rerun()
                     else:
@@ -275,11 +331,12 @@ with st.sidebar:
         st.success(f"✅ Session Active")
         st.info(f"🆔 ID: {st.session_state.session_id[:8]}...")
         
-        if st.button("🔚 End Session", use_container_width=True):
+        if st.button("🔚 End Session", width="stretch"):
             st.session_state.started = False
             st.session_state.session_id = None
             st.session_state.messages = []
             st.session_state.phase = "idle"
+            st.session_state.deal_form_open = False
             st.rerun()
     
     st.divider()
@@ -330,7 +387,7 @@ with st.sidebar:
                 }
             ))
             fig.update_layout(height=200, margin=dict(l=10, r=10, t=10, b=10))
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})
     
     st.divider()
     
@@ -345,7 +402,7 @@ with st.sidebar:
     ]
     
     for q in quick_questions:
-        if st.button(q, use_container_width=True, key=f"quick_{hash(q)}"):
+        if st.button(q, width="stretch", key=f"quick_{hash(q)}"):
             st.session_state.quick_question = q
             st.rerun()
     
@@ -359,41 +416,126 @@ with st.sidebar:
 
 # ==================== MAIN CONTENT ====================
 if st.session_state.started:
+    if st.button("📋 View Saved Deals", key="top_view_saved_deals", width="stretch"):
+        try:
+            response = requests.get("http://localhost:8000/api/deals", timeout=15)
+            if response.status_code == 200:
+                st.session_state.saved_deals = response.json()
+                if st.session_state.saved_deals:
+                    st.success(f"Loaded {len(st.session_state.saved_deals)} saved deal(s).")
+                else:
+                    st.info("No deals saved yet.")
+            else:
+                st.error(f"Unable to load deals: {response.text}")
+        except Exception as e:
+            st.error(f"❌ Error loading saved deals: {e}")
+
     # Status bar
     status_emoji = {"active": "🟢", "research": "🟠", "idle": "⚪", "completed": "🔵"}
     status = status_emoji.get(st.session_state.phase, "⚪")
-    st.markdown(f"""
-    <div style="display:flex; justify-content:space-between; align-items:center; background:#f8f9fa; padding:0.5rem 1rem; border-radius:10px; margin-bottom:1rem;">
-        <span>📊 <strong>Status:</strong> <span class="status-badge status-{st.session_state.phase}">{status} {st.session_state.phase.upper()}</span></span>
-        <span>💬 <strong>Messages:</strong> {len(st.session_state.messages)}</span>
-        <span>🎯 <strong>Confidence:</strong> {st.session_state.confidence * 100:.0f}%</span>
-    </div>
-    """, unsafe_allow_html=True)
-    
+    route_label = (st.session_state.last_route or "unknown").replace("_", " ").title()
+    classification_label = (st.session_state.last_classification or "unknown").replace("_", " ").title()
+    st.markdown("<div class='status-strip'><div class='status-pill'>📊 " + st.session_state.phase.upper() + "</div><div>💬 Messages: " + str(len(st.session_state.messages)) + "</div><div>🎯 Confidence: " + f"{st.session_state.confidence * 100:.0f}%" + "</div><div>🧠 Type: " + classification_label + "</div><div>🔀 Route: " + route_label + "</div></div>", unsafe_allow_html=True)
+
     # Chat container
-    with st.container():
-        st.markdown('<div class="chat-container">', unsafe_allow_html=True)
-        
-        for msg in st.session_state.messages:
-            if msg["role"] == "user":
-                st.markdown(f"""
-                <div class="message-user">
-                    <strong>👤 You</strong>
-                    <div>{msg["content"]}</div>
-                    <div class="message-time">🕐 {msg.get("timestamp", "")}</div>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                <div class="message-assistant">
-                    <strong>🤖 Actiboost AI</strong>
-                    <div>{msg["content"]}</div>
-                    <div class="message-time">🕐 {msg.get("timestamp", "")}</div>
-                </div>
-                """, unsafe_allow_html=True)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("<div class='chat-shell'>", unsafe_allow_html=True)
+    for msg in st.session_state.messages:
+        if msg["role"] == "user":
+            with st.chat_message("user"):
+                st.write(normalize_chat_text(msg["content"]))
+                st.caption(f"🕐 {msg.get('timestamp', '')}")
+        else:
+            route = msg.get("route") or st.session_state.last_route
+            classification = msg.get("classification") or st.session_state.last_classification
+            with st.chat_message("assistant"):
+                st.caption(render_route_tag(route, classification))
+                st.write(normalize_chat_text(msg["content"]))
+                st.caption(f"🕐 {msg.get('timestamp', '')}")
+    st.markdown("</div>", unsafe_allow_html=True)
     
+    show_final_deal_form = st.session_state.deal_form_open
+
+    if show_final_deal_form:
+        st.markdown("### ✅ Final Deal Form")
+        with st.form("final_deal_form_chat", clear_on_submit=False):
+            col1, col2 = st.columns(2)
+            with col1:
+                customer_name = st.text_input("Customer Name")
+                customer_email = st.text_input("Email")
+                customer_phone = st.text_input("Contact Number")
+            with col2:
+                project_type = st.text_input("Project Type", value="Construction")
+                final_price = st.number_input("Final Negotiated Price", min_value=0.0, step=1000.0, format="%.2f")
+
+            save_deal_clicked = st.form_submit_button("💾 Save Final Deal", width="stretch")
+
+        if save_deal_clicked:
+            if not customer_name.strip():
+                st.error("Please enter the customer name before saving the deal.")
+            else:
+                payload = {
+                    "customer_name": customer_name.strip(),
+                    "customer_email": customer_email.strip() if customer_email.strip() else None,
+                    "customer_phone": customer_phone.strip() if customer_phone.strip() else None,
+                    "project_type": project_type.strip() or "Construction",
+                    "project_size": "",
+                    "location": "",
+                    "initial_price": float(final_price or 0),
+                    "final_price": float(final_price or 0),
+                    "session_id": st.session_state.session_id or "manual_deal",
+                    "negotiation_history": [{
+                        "role": "agent",
+                        "content": "Final deal confirmed by customer and agent.",
+                        "timestamp": datetime.now().isoformat()
+                    }]
+                }
+                try:
+                    response = requests.post(
+                        "http://localhost:8000/api/deal/create",
+                        json=payload,
+                        timeout=15
+                    )
+                    if response.status_code == 200:
+                        result = response.json()
+                        st.session_state.deal_saved_message = (
+                            f"✅ Deal saved successfully for {customer_name.strip()}. "
+                            f"Record ID: {result.get('deal_id')}"
+                        )
+                        st.session_state.last_saved_deal = {
+                            "customer_name": customer_name.strip(),
+                            "customer_email": customer_email.strip() if customer_email.strip() else "N/A",
+                            "customer_phone": customer_phone.strip() if customer_phone.strip() else "N/A",
+                            "project_type": project_type.strip() or "Construction",
+                            "final_price": float(final_price or 0),
+                        }
+                        st.session_state.deal_form_open = True
+                        st.success(st.session_state.deal_saved_message)
+                    else:
+                        st.error(f"Deal save failed: {response.text}")
+                except Exception as e:
+                    st.error(f"❌ Could not save deal: {e}")
+
+        if st.session_state.deal_saved_message:
+            st.info(st.session_state.deal_saved_message)
+
+        if st.session_state.last_saved_deal:
+            st.markdown("#### 🧾 Last Saved Deal")
+            st.json(st.session_state.last_saved_deal)
+
+        if st.session_state.saved_deals:
+            st.markdown("#### 📊 Saved Deals Table")
+            records = []
+            for deal in st.session_state.saved_deals:
+                records.append({
+                    "Name": deal.get("customer_name", ""),
+                    "Email": deal.get("customer_email") or "N/A",
+                    "Contact": deal.get("customer_phone") or "N/A",
+                    "Project": deal.get("project_type", ""),
+                    "Final Price": deal.get("final_price", 0),
+                    "Status": deal.get("status", "pending")
+                })
+            st.dataframe(pd.DataFrame(records), width="stretch")
+
     # Quick question handler
     if hasattr(st.session_state, 'quick_question') and st.session_state.quick_question:
         question = st.session_state.quick_question
@@ -402,7 +544,7 @@ if st.session_state.started:
         # Add user message
         st.session_state.messages.append({
             "role": "user",
-            "content": question,
+            "content": normalize_chat_text(question),
             "timestamp": datetime.now().strftime("%H:%M:%S")
         })
         
@@ -417,14 +559,18 @@ if st.session_state.started:
                 
                 if response.status_code == 200:
                     data = response.json()
-                    assistant_message = data.get("response", "I'm thinking about that...")
+                    assistant_message = normalize_chat_text(data.get("response", "I'm thinking about that..."))
                     st.session_state.phase = data.get("phase", st.session_state.phase)
                     st.session_state.confidence = data.get("confidence", st.session_state.confidence)
+                    st.session_state.last_route = data.get("route", st.session_state.last_route)
+                    st.session_state.last_classification = data.get("classification", st.session_state.last_classification)
                     
                     st.session_state.messages.append({
                         "role": "assistant",
                         "content": assistant_message,
-                        "timestamp": datetime.now().strftime("%H:%M:%S")
+                        "timestamp": datetime.now().strftime("%H:%M:%S"),
+                        "route": data.get("route", st.session_state.last_route),
+                        "classification": data.get("classification", st.session_state.last_classification),
                     })
                     
                     st.rerun()
@@ -433,10 +579,15 @@ if st.session_state.started:
     
     # Chat input
     if prompt := st.chat_input("💬 Ask about construction, flats, pricing..."):
+        if detect_final_deal_request(prompt):
+            st.session_state.deal_form_open = True
+        else:
+            st.session_state.deal_form_open = False
+
         # Add user message
         st.session_state.messages.append({
             "role": "user",
-            "content": prompt,
+            "content": normalize_chat_text(prompt),
             "timestamp": datetime.now().strftime("%H:%M:%S")
         })
         
@@ -455,11 +606,15 @@ if st.session_state.started:
                     st.session_state.phase = data.get("phase", st.session_state.phase)
                     st.session_state.confidence = data.get("confidence", st.session_state.confidence)
                     st.session_state.message_count = data.get("message_count", 0)
+                    st.session_state.last_route = data.get("route", st.session_state.last_route)
+                    st.session_state.last_classification = data.get("classification", st.session_state.last_classification)
                     
                     st.session_state.messages.append({
                         "role": "assistant",
                         "content": assistant_message,
-                        "timestamp": datetime.now().strftime("%H:%M:%S")
+                        "timestamp": datetime.now().strftime("%H:%M:%S"),
+                        "route": data.get("route", st.session_state.last_route),
+                        "classification": data.get("classification", st.session_state.last_classification),
                     })
                     
                     st.rerun()
