@@ -236,40 +236,39 @@ def get_api_base_url() -> str:
     for url in candidates:
         try:
             response = requests.get(f"{url}/", timeout=1.5)
-            if response.status_code < 500:
+            if response.status_code == 200 and response.json().get("message") == "Actiboost Negotiation System API":
                 return url
-        except Exception:
+        except (requests.RequestException, ValueError, AttributeError):
             continue
 
     project_root = Path(__file__).resolve().parent
     venv_python = project_root / "actibosst" / "Scripts" / "python.exe"
-    if venv_python.exists():
-        subprocess.Popen(
-            [
-                str(venv_python),
-                "-m",
-                "uvicorn",
-                "src.api.main:app",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                "8003",
-            ],
-            cwd=str(project_root),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
+    python_executable = str(venv_python if venv_python.exists() else Path(os.sys.executable))
+    subprocess.Popen(
+        [
+            python_executable,
+            "-m",
+            "uvicorn",
+            "src.api.main:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8003",
+        ],
+        cwd=str(project_root),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
 
-        for _ in range(25):
-            time.sleep(0.8)
-            for url in candidates:
-                try:
-                    response = requests.get(f"{url}/", timeout=1.5)
-                    if response.status_code < 500:
-                        return url
-                except Exception:
-                    continue
+    for _ in range(15):
+        time.sleep(0.4)
+        try:
+            response = requests.get("http://localhost:8003/", timeout=0.5)
+            if response.status_code == 200 and response.json().get("message") == "Actiboost Negotiation System API":
+                return "http://localhost:8003"
+        except (requests.RequestException, ValueError, AttributeError):
+            continue
 
     return "http://localhost:8003"
 
