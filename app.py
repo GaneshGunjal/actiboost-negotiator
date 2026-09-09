@@ -229,10 +229,14 @@ def get_api_base_url() -> str:
     """
     Get the API base URL - works for both local development and Render deployment
     """
-    # For Render deployment
-    render_url = os.environ.get("RENDER_EXTERNAL_URL", "")
-    if render_url:
-        return render_url
+    # On Render, both services run on the same server
+    # FastAPI is on port 8000, Streamlit on port 10000
+    # Use localhost for internal communication
+    is_render = os.environ.get("RENDER", "")
+    
+    if is_render:
+        # On Render - use localhost to reach FastAPI internally
+        return "http://localhost:8000"
     
     # For local development
     try:
@@ -322,7 +326,7 @@ def start_session_automatically():
                 })
                 return True
             except json.JSONDecodeError:
-                st.error(f"❌ Invalid response from server: {response.text[:200]}")
+                st.error(f"❌ Invalid response from server. Please check if the FastAPI backend is running on port 8000.")
                 return False
         
         # If GET fails with 405, try POST
@@ -349,13 +353,13 @@ def start_session_automatically():
                     })
                     return True
                 except json.JSONDecodeError:
-                    st.error(f"❌ Invalid response from server: {response.text[:200]}")
+                    st.error(f"❌ Invalid response from server. Please check if the FastAPI backend is running on port 8000.")
                     return False
 
-        st.error(f"❌ Could not start session: {response.status_code} - {response.text[:200]}")
+        st.error(f"❌ Could not start session: {response.status_code}")
         return False
     except requests.exceptions.ConnectionError:
-        st.error("❌ Connection Error: Could not connect to the API. Please check if the backend is running.")
+        st.error("❌ Connection Error: Could not connect to FastAPI on port 8000. Please check if the backend is running.")
         return False
     except requests.exceptions.Timeout:
         st.error("❌ Timeout: The API request timed out. Please try again.")
