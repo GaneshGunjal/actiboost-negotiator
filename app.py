@@ -229,59 +229,19 @@ def get_api_base_url() -> str:
     """
     Get the API base URL - works for both local development and Render deployment
     """
-    # Check if we're running on Render
-    is_render = os.environ.get("RENDER", "")
-    
-    if is_render:
-        # On Render - use the public URL since FastAPI is on the same service
-        return "https://actiboost-negotiator-bd1e.onrender.com"
+    # For Render deployment
+    render_url = os.environ.get("RENDER_EXTERNAL_URL", "")
+    if render_url:
+        return render_url
     
     # For local development
-    candidates = [
-        "http://localhost:8000",
-        "http://localhost:8001",
-        "http://localhost:8002",
-        "http://localhost:8003",
-    ]
-
-    for url in candidates:
-        try:
-            response = requests.get(f"{url}/", timeout=1.5)
-            if response.status_code == 200 and response.json().get("message") == "Actiboost Negotiation System API":
-                return url
-        except (requests.RequestException, ValueError, AttributeError):
-            continue
-
-    # Try to start the server locally
-    project_root = Path(__file__).resolve().parent
-    venv_python = project_root / "actibosst" / "Scripts" / "python.exe"
-    python_executable = str(venv_python if venv_python.exists() else Path(os.sys.executable))
-    subprocess.Popen(
-        [
-            python_executable,
-            "-m",
-            "uvicorn",
-            "src.api.main:app",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            "8000",
-        ],
-        cwd=str(project_root),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
-
-    for _ in range(15):
-        time.sleep(0.4)
-        try:
-            response = requests.get("http://localhost:8000/", timeout=0.5)
-            if response.status_code == 200 and response.json().get("message") == "Actiboost Negotiation System API":
-                return "http://localhost:8000"
-        except (requests.RequestException, ValueError, AttributeError):
-            continue
-
+    try:
+        response = requests.get("http://localhost:8000/", timeout=2)
+        if response.status_code == 200:
+            return "http://localhost:8000"
+    except:
+        pass
+    
     return "http://localhost:8000"
 
 
@@ -338,33 +298,70 @@ def start_session_automatically():
     api_url = get_api_base_url()
     
     try:
-        # Using GET instead of POST (FIXED)
+        # Try GET first
         response = requests.get(
             f"{api_url}/api/session/start",
             params={"student_id": "web_user", "exam_id": "negotiation"},
-            timeout=15,
+            timeout=10,
         )
         
         if response.status_code == 200:
-            data = response.json()
-            st.session_state.session_id = data.get("session_id")
-            st.session_state.started = True
-            st.session_state.phase = "active"
-            st.session_state.deal_form_open = False
-            st.session_state.messages = []
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": normalize_chat_text(data.get("welcome_message") or "🏗️ Welcome to Actiboost AI Negotiator! I'm here to help you with your construction needs. What can I assist you with today?"),
-                "timestamp": datetime.now().strftime("%H:%M:%S"),
-                "route": "conversational",
-                "classification": "conversational",
-            })
-            return True
+            try:
+                data = response.json()
+                st.session_state.session_id = data.get("session_id")
+                st.session_state.started = True
+                st.session_state.phase = "active"
+                st.session_state.deal_form_open = False
+                st.session_state.messages = []
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": normalize_chat_text(data.get("welcome_message") or "🏗️ Welcome to Actiboost AI Negotiator! I'm here to help you with your construction needs. What can I assist you with today?"),
+                    "timestamp": datetime.now().strftime("%H:%M:%S"),
+                    "route": "conversational",
+                    "classification": "conversational",
+                })
+                return True
+            except json.JSONDecodeError:
+                st.error(f"❌ Invalid response from server: {response.text[:200]}")
+                return False
+        
+        # If GET fails with 405, try POST
+        if response.status_code == 405:
+            response = requests.post(
+                f"{api_url}/api/session/start",
+                params={"student_id": "web_user", "exam_id": "negotiation"},
+                timeout=10,
+            )
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    st.session_state.session_id = data.get("session_id")
+                    st.session_state.started = True
+                    st.session_state.phase = "active"
+                    st.session_state.deal_form_open = False
+                    st.session_state.messages = []
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": normalize_chat_text(data.get("welcome_message") or "🏗️ Welcome to Actiboost AI Negotiator! I'm here to help you with your construction needs. What can I assist you with today?"),
+                        "timestamp": datetime.now().strftime("%H:%M:%S"),
+                        "route": "conversational",
+                        "classification": "conversational",
+                    })
+                    return True
+                except json.JSONDecodeError:
+                    st.error(f"❌ Invalid response from server: {response.text[:200]}")
+                    return False
 
-        st.error(f"❌ Could not start session: {response.status_code} - {response.text}")
+        st.error(f"❌ Could not start session: {response.status_code} - {response.text[:200]}")
+        return False
+    except requests.exceptions.ConnectionError:
+        st.error("❌ Connection Error: Could not connect to the API. Please check if the backend is running.")
+        return False
+    except requests.exceptions.Timeout:
+        st.error("❌ Timeout: The API request timed out. Please try again.")
         return False
     except Exception as exc:
-        st.error(f"❌ Connection error: {exc}")
+        st.error(f"❌ Error: {exc}")
         return False
 
 
