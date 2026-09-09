@@ -234,7 +234,6 @@ def get_api_base_url() -> str:
     
     if is_render:
         # On Render - use the public URL since FastAPI is on the same service
-        # The FastAPI is running on port 8000 internally but exposed via the same domain
         return "https://actiboost-negotiator-bd1e.onrender.com"
     
     # For local development
@@ -338,16 +337,13 @@ def detect_final_deal_request(text: str) -> bool:
 def start_session_automatically():
     api_url = get_api_base_url()
     
-    # Debug info
-    st.info(f"🔄 Connecting to API at: {api_url}")
-    
     try:
-        response = requests.post(
+        # Using GET instead of POST (FIXED)
+        response = requests.get(
             f"{api_url}/api/session/start",
             params={"student_id": "web_user", "exam_id": "negotiation"},
             timeout=15,
         )
-        st.info(f"📡 Response Status: {response.status_code}")
         
         if response.status_code == 200:
             data = response.json()
@@ -363,16 +359,9 @@ def start_session_automatically():
                 "route": "conversational",
                 "classification": "conversational",
             })
-            st.success("✅ Session started successfully!")
             return True
 
         st.error(f"❌ Could not start session: {response.status_code} - {response.text}")
-        return False
-    except requests.exceptions.ConnectionError:
-        st.error("❌ Connection Error: Could not connect to the API. Please check if the backend is running.")
-        return False
-    except requests.exceptions.Timeout:
-        st.error("❌ Timeout: The API request timed out. Please try again.")
         return False
     except Exception as exc:
         st.error(f"❌ Connection error: {exc}")
