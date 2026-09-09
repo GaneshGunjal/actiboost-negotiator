@@ -226,6 +226,15 @@ if "session_start_attempted" not in st.session_state:
 
 
 def get_api_base_url() -> str:
+    """
+    Get the API base URL - works for both local development and Render deployment
+    """
+    # For Render deployment - use the public URL
+    render_url = os.environ.get("RENDER_EXTERNAL_URL", "")
+    if render_url:
+        return render_url
+    
+    # For local development
     candidates = [
         "http://localhost:8003",
         "http://localhost:8000",
@@ -241,6 +250,7 @@ def get_api_base_url() -> str:
         except (requests.RequestException, ValueError, AttributeError):
             continue
 
+    # Try to start the server locally
     project_root = Path(__file__).resolve().parent
     venv_python = project_root / "actibosst" / "Scripts" / "python.exe"
     python_executable = str(venv_python if venv_python.exists() else Path(os.sys.executable))
