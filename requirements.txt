@@ -1,59 +1,41 @@
 # Core Framework
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-websockets==12.0
-pydantic==2.7.4
-pydantic-settings==2.4.0
-python-multipart==0.0.6
+fastapi
+uvicorn[standard]
+websockets
+pydantic
+pydantic-settings
+python-multipart
 
-# AI & LLM - Updated versions
-langchain==0.3.13
-langchain-core==0.3.45
-langchain-groq==0.3.0
-groq==0.4.2
-langgraph==0.2.0
-langsmith==0.1.117
+# AI & LLM
+langchain
+langchain-core
+langchain-groq
+groq
+langgraph
+langsmith
 
 # RAG & Vector Database
-qdrant-client==1.19.0
-langchain-community==0.3.13
-unstructured==0.16.19
-pypdf==4.0.0
-pdfplumber==0.10.3
-
-# Guardrails & Evaluation
-nemoguardrails==0.5.0
-ragas==0.1.0
-datasets==2.16.0
-
-# Observability
-logfire==0.12.0
-opentelemetry-api==1.21.0
-opentelemetry-sdk==1.21.0
-
-# Rate Limiting & Caching
-slowapi==0.1.9
-aiocache==0.12.0
-cachetools==5.3.1
+qdrant-client
+langchain-community
+unstructured
+pypdf
+pdfplumber
 
 # Frontend
-streamlit==1.28.0
-streamlit-chat==0.1.0
-streamlit-option-menu==0.4.0
-plotly==5.18.0
-pandas==2.1.0
-
-# PDF Generation
-fpdf==1.7.2
+streamlit
+streamlit-chat
+streamlit-option-menu
+plotly
+pandas
 
 # Utilities
-python-dotenv==1.0.0
-httpx==0.25.1
-aiofiles==23.2.1
-tenacity==8.2.3
-click==8.1.7
+python-dotenv
+httpx
+aiofiles
+tenacity
+click
 
 # Testing
-pytest==7.4.3
-pytest-asyncio==0.21.1
-pytest-cov==4.1.0
+pytest
+pytest-asyncio
+pytest-cov
