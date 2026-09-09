@@ -236,10 +236,10 @@ def get_api_base_url() -> str:
     
     # For local development
     candidates = [
-        "http://localhost:8003",
         "http://localhost:8000",
         "http://localhost:8001",
         "http://localhost:8002",
+        "http://localhost:8003",
     ]
 
     for url in candidates:
@@ -263,7 +263,7 @@ def get_api_base_url() -> str:
             "--host",
             "127.0.0.1",
             "--port",
-            "8003",
+            "8000",
         ],
         cwd=str(project_root),
         stdout=subprocess.DEVNULL,
@@ -274,18 +274,19 @@ def get_api_base_url() -> str:
     for _ in range(15):
         time.sleep(0.4)
         try:
-            response = requests.get("http://localhost:8003/", timeout=0.5)
+            response = requests.get("http://localhost:8000/", timeout=0.5)
             if response.status_code == 200 and response.json().get("message") == "Actiboost Negotiation System API":
-                return "http://localhost:8003"
+                return "http://localhost:8000"
         except (requests.RequestException, ValueError, AttributeError):
             continue
 
-    return "http://localhost:8003"
+    return "http://localhost:8000"
 
 
 def start_session_automatically():
     api_url = get_api_base_url()
     try:
+        # Try with POST first (correct method)
         response = requests.post(
             f"{api_url}/api/session/start",
             params={"student_id": "web_user", "exam_id": "negotiation"},
@@ -306,6 +307,29 @@ def start_session_automatically():
                 "classification": "conversational",
             })
             return True
+
+        # If POST fails with Method Not Allowed, try GET
+        if response.status_code == 405:
+            response = requests.get(
+                f"{api_url}/api/session/start",
+                params={"student_id": "web_user", "exam_id": "negotiation"},
+                timeout=15,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                st.session_state.session_id = data.get("session_id")
+                st.session_state.started = True
+                st.session_state.phase = "active"
+                st.session_state.deal_form_open = False
+                st.session_state.messages = []
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": normalize_chat_text(data.get("welcome_message") or "🏗️ Welcome to Actiboost AI Negotiator! I'm here to help you with your construction needs. What can I assist you with today?"),
+                    "timestamp": datetime.now().strftime("%H:%M:%S"),
+                    "route": "conversational",
+                    "classification": "conversational",
+                })
+                return True
 
         st.error(f"❌ Could not start session: {response.text}")
         return False
