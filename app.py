@@ -223,6 +223,8 @@ if "last_speech_text" not in st.session_state:
     st.session_state.last_speech_text = ""
 if "session_start_attempted" not in st.session_state:
     st.session_state.session_start_attempted = False
+if "debug_info" not in st.session_state:
+    st.session_state.debug_info = ""
 
 
 def get_api_base_url() -> str:
@@ -284,14 +286,27 @@ def get_api_base_url() -> str:
 
 
 def start_session_automatically():
+    """Start a new session with the API"""
     api_url = get_api_base_url()
+    
+    # Debug info
+    debug_msg = f"🔄 Connecting to API at: {api_url}\n"
+    st.session_state.debug_info = debug_msg
+    
     try:
-        # Try with POST first (correct method)
+        # Try with POST first
+        debug_msg += f"📡 Sending POST request to: {api_url}/api/session/start\n"
+        st.session_state.debug_info = debug_msg
+        
         response = requests.post(
             f"{api_url}/api/session/start",
             params={"student_id": "web_user", "exam_id": "negotiation"},
             timeout=15,
         )
+        
+        debug_msg += f"📡 Response Status: {response.status_code}\n"
+        st.session_state.debug_info = debug_msg
+        
         if response.status_code == 200:
             data = response.json()
             st.session_state.session_id = data.get("session_id")
@@ -306,15 +321,24 @@ def start_session_automatically():
                 "route": "conversational",
                 "classification": "conversational",
             })
+            debug_msg += "✅ Session started successfully!\n"
+            st.session_state.debug_info = debug_msg
             return True
 
         # If POST fails with Method Not Allowed, try GET
         if response.status_code == 405:
+            debug_msg += "🔄 Method Not Allowed, trying GET...\n"
+            st.session_state.debug_info = debug_msg
+            
             response = requests.get(
                 f"{api_url}/api/session/start",
                 params={"student_id": "web_user", "exam_id": "negotiation"},
                 timeout=15,
             )
+            
+            debug_msg += f"📡 GET Response Status: {response.status_code}\n"
+            st.session_state.debug_info = debug_msg
+            
             if response.status_code == 200:
                 data = response.json()
                 st.session_state.session_id = data.get("session_id")
@@ -329,12 +353,29 @@ def start_session_automatically():
                     "route": "conversational",
                     "classification": "conversational",
                 })
+                debug_msg += "✅ Session started successfully with GET!\n"
+                st.session_state.debug_info = debug_msg
                 return True
 
-        st.error(f"❌ Could not start session: {response.text}")
+        debug_msg += f"❌ Could not start session: {response.status_code} - {response.text}\n"
+        st.session_state.debug_info = debug_msg
+        st.error(f"❌ Could not start session: {response.status_code} - {response.text}")
+        return False
+        
+    except requests.exceptions.ConnectionError:
+        debug_msg += "❌ Connection Error: Could not connect to the API. Is the backend running?\n"
+        st.session_state.debug_info = debug_msg
+        st.error("❌ Connection Error: Could not connect to the API. Please check if the backend is running.")
+        return False
+    except requests.exceptions.Timeout:
+        debug_msg += "❌ Timeout: The API request timed out.\n"
+        st.session_state.debug_info = debug_msg
+        st.error("❌ Timeout: The API request timed out. Please try again.")
         return False
     except Exception as exc:
-        st.error(f"❌ Connection error: {exc}")
+        debug_msg += f"❌ Error: {exc}\n"
+        st.session_state.debug_info = debug_msg
+        st.error(f"❌ Error: {exc}")
         return False
 
 
@@ -581,6 +622,12 @@ with st.sidebar:
     
     # Session Controls
     if not st.session_state.started:
+        # Show debug info if available
+        if st.session_state.debug_info:
+            with st.expander("🔍 Debug Info"):
+                st.text(st.session_state.debug_info)
+        
+        # Try automatic start once
         if not st.session_state.session_start_attempted:
             st.session_state.session_start_attempted = True
             with st.spinner("🔄 Starting session automatically..."):
@@ -589,6 +636,7 @@ with st.sidebar:
 
         if st.button("🚀 Start New Session", width="stretch", type="primary"):
             st.session_state.session_start_attempted = False
+            st.session_state.debug_info = ""
             with st.spinner("🔄 Starting session..."):
                 if start_session_automatically():
                     st.rerun()
