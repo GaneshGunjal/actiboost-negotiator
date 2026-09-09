@@ -223,90 +223,25 @@ if "last_speech_text" not in st.session_state:
     st.session_state.last_speech_text = ""
 if "session_start_attempted" not in st.session_state:
     st.session_state.session_start_attempted = False
-if "debug_info" not in st.session_state:
-    st.session_state.debug_info = ""
 
 
 def get_api_base_url() -> str:
     """
     Get the API base URL - works for both local development and Render deployment
     """
-    # For Render deployment - use the public URL
-    render_url = os.environ.get("RENDER_EXTERNAL_URL", "")
-    if render_url:
-        return render_url
-    
-    # For local development
-    candidates = [
-        "http://localhost:8000",
-        "http://localhost:8001",
-        "http://localhost:8002",
-        "http://localhost:8003",
-    ]
-
-    for url in candidates:
-        try:
-            response = requests.get(f"{url}/", timeout=1.5)
-            if response.status_code == 200 and response.json().get("message") == "Actiboost Negotiation System API":
-                return url
-        except (requests.RequestException, ValueError, AttributeError):
-            continue
-
-    # Try to start the server locally
-    project_root = Path(__file__).resolve().parent
-    venv_python = project_root / "actibosst" / "Scripts" / "python.exe"
-    python_executable = str(venv_python if venv_python.exists() else Path(os.sys.executable))
-    subprocess.Popen(
-        [
-            python_executable,
-            "-m",
-            "uvicorn",
-            "src.api.main:app",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            "8000",
-        ],
-        cwd=str(project_root),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
-
-    for _ in range(15):
-        time.sleep(0.4)
-        try:
-            response = requests.get("http://localhost:8000/", timeout=0.5)
-            if response.status_code == 200 and response.json().get("message") == "Actiboost Negotiation System API":
-                return "http://localhost:8000"
-        except (requests.RequestException, ValueError, AttributeError):
-            continue
-
+    # For Render deployment - use localhost since both services are on the same server
+    # FastAPI is running on port 8000 internally
     return "http://localhost:8000"
 
 
 def start_session_automatically():
-    """Start a new session with the API"""
     api_url = get_api_base_url()
-    
-    # Debug info
-    debug_msg = f"🔄 Connecting to API at: {api_url}\n"
-    st.session_state.debug_info = debug_msg
-    
     try:
-        # Try with POST first
-        debug_msg += f"📡 Sending POST request to: {api_url}/api/session/start\n"
-        st.session_state.debug_info = debug_msg
-        
         response = requests.post(
             f"{api_url}/api/session/start",
             params={"student_id": "web_user", "exam_id": "negotiation"},
             timeout=15,
         )
-        
-        debug_msg += f"📡 Response Status: {response.status_code}\n"
-        st.session_state.debug_info = debug_msg
-        
         if response.status_code == 200:
             data = response.json()
             st.session_state.session_id = data.get("session_id")
@@ -321,61 +256,12 @@ def start_session_automatically():
                 "route": "conversational",
                 "classification": "conversational",
             })
-            debug_msg += "✅ Session started successfully!\n"
-            st.session_state.debug_info = debug_msg
             return True
 
-        # If POST fails with Method Not Allowed, try GET
-        if response.status_code == 405:
-            debug_msg += "🔄 Method Not Allowed, trying GET...\n"
-            st.session_state.debug_info = debug_msg
-            
-            response = requests.get(
-                f"{api_url}/api/session/start",
-                params={"student_id": "web_user", "exam_id": "negotiation"},
-                timeout=15,
-            )
-            
-            debug_msg += f"📡 GET Response Status: {response.status_code}\n"
-            st.session_state.debug_info = debug_msg
-            
-            if response.status_code == 200:
-                data = response.json()
-                st.session_state.session_id = data.get("session_id")
-                st.session_state.started = True
-                st.session_state.phase = "active"
-                st.session_state.deal_form_open = False
-                st.session_state.messages = []
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": normalize_chat_text(data.get("welcome_message") or "🏗️ Welcome to Actiboost AI Negotiator! I'm here to help you with your construction needs. What can I assist you with today?"),
-                    "timestamp": datetime.now().strftime("%H:%M:%S"),
-                    "route": "conversational",
-                    "classification": "conversational",
-                })
-                debug_msg += "✅ Session started successfully with GET!\n"
-                st.session_state.debug_info = debug_msg
-                return True
-
-        debug_msg += f"❌ Could not start session: {response.status_code} - {response.text}\n"
-        st.session_state.debug_info = debug_msg
-        st.error(f"❌ Could not start session: {response.status_code} - {response.text}")
-        return False
-        
-    except requests.exceptions.ConnectionError:
-        debug_msg += "❌ Connection Error: Could not connect to the API. Is the backend running?\n"
-        st.session_state.debug_info = debug_msg
-        st.error("❌ Connection Error: Could not connect to the API. Please check if the backend is running.")
-        return False
-    except requests.exceptions.Timeout:
-        debug_msg += "❌ Timeout: The API request timed out.\n"
-        st.session_state.debug_info = debug_msg
-        st.error("❌ Timeout: The API request timed out. Please try again.")
+        st.error(f"❌ Could not start session: {response.text}")
         return False
     except Exception as exc:
-        debug_msg += f"❌ Error: {exc}\n"
-        st.session_state.debug_info = debug_msg
-        st.error(f"❌ Error: {exc}")
+        st.error(f"❌ Connection error: {exc}")
         return False
 
 
@@ -622,12 +508,6 @@ with st.sidebar:
     
     # Session Controls
     if not st.session_state.started:
-        # Show debug info if available
-        if st.session_state.debug_info:
-            with st.expander("🔍 Debug Info"):
-                st.text(st.session_state.debug_info)
-        
-        # Try automatic start once
         if not st.session_state.session_start_attempted:
             st.session_state.session_start_attempted = True
             with st.spinner("🔄 Starting session automatically..."):
@@ -636,7 +516,6 @@ with st.sidebar:
 
         if st.button("🚀 Start New Session", width="stretch", type="primary"):
             st.session_state.session_start_attempted = False
-            st.session_state.debug_info = ""
             with st.spinner("🔄 Starting session..."):
                 if start_session_automatically():
                     st.rerun()
