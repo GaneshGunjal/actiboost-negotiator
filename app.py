@@ -229,19 +229,126 @@ def get_api_base_url() -> str:
     """
     Get the API base URL - works for both local development and Render deployment
     """
-    # For Render deployment - use localhost since both services are on the same server
-    # FastAPI is running on port 8000 internally
+    # Check if we're running on Render
+    is_render = os.environ.get("RENDER", "")
+    
+    if is_render:
+        # On Render - use the public URL since FastAPI is on the same service
+        # The FastAPI is running on port 8000 internally but exposed via the same domain
+        return "https://actiboost-negotiator-bd1e.onrender.com"
+    
+    # For local development
+    candidates = [
+        "http://localhost:8000",
+        "http://localhost:8001",
+        "http://localhost:8002",
+        "http://localhost:8003",
+    ]
+
+    for url in candidates:
+        try:
+            response = requests.get(f"{url}/", timeout=1.5)
+            if response.status_code == 200 and response.json().get("message") == "Actiboost Negotiation System API":
+                return url
+        except (requests.RequestException, ValueError, AttributeError):
+            continue
+
+    # Try to start the server locally
+    project_root = Path(__file__).resolve().parent
+    venv_python = project_root / "actibosst" / "Scripts" / "python.exe"
+    python_executable = str(venv_python if venv_python.exists() else Path(os.sys.executable))
+    subprocess.Popen(
+        [
+            python_executable,
+            "-m",
+            "uvicorn",
+            "src.api.main:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8000",
+        ],
+        cwd=str(project_root),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+
+    for _ in range(15):
+        time.sleep(0.4)
+        try:
+            response = requests.get("http://localhost:8000/", timeout=0.5)
+            if response.status_code == 200 and response.json().get("message") == "Actiboost Negotiation System API":
+                return "http://localhost:8000"
+        except (requests.RequestException, ValueError, AttributeError):
+            continue
+
     return "http://localhost:8000"
+
+
+def detect_final_deal_request(text: str) -> bool:
+    """Detect if the user is confirming/accepting a deal"""
+    normalized = (text or "").lower().strip()
+    triggers = [
+        "book the deal",
+        "book this deal",
+        "book on",
+        "book at",
+        "book for",
+        "okay then book",
+        "okay then finalize",
+        "i am okay with the price",
+        "i am okay with this price",
+        "i am ok with the price",
+        "i am okay with",
+        "i am ok with",
+        "i agree to the price",
+        "i accept the deal",
+        "accept the deal",
+        "confirm the deal",
+        "close the deal",
+        "finalize the deal",
+        "go ahead with the deal",
+        "okay then deal",
+        "book the flat",
+        "book this flat",
+        "ready with the price",
+        "deal confirmed",
+        "i am ready to book",
+        "confirm booking",
+        "confirm this deal",
+        "finalize this deal",
+        "i am ready",
+        "i agree",
+        "okay with the price"
+    ]
+    if any(trigger in normalized for trigger in triggers):
+        return True
+    if "book" in normalized and ("lakh" in normalized or "price" in normalized or "deal" in normalized):
+        return True
+    if "okay" in normalized and ("book" in normalized or "deal" in normalized or "price" in normalized):
+        return True
+    if "confirm" in normalized and ("deal" in normalized or "price" in normalized):
+        return True
+    if "ready" in normalized and ("deal" in normalized or "price" in normalized or "book" in normalized):
+        return True
+    return False
 
 
 def start_session_automatically():
     api_url = get_api_base_url()
+    
+    # Debug info
+    st.info(f"🔄 Connecting to API at: {api_url}")
+    
     try:
         response = requests.post(
             f"{api_url}/api/session/start",
             params={"student_id": "web_user", "exam_id": "negotiation"},
             timeout=15,
         )
+        st.info(f"📡 Response Status: {response.status_code}")
+        
         if response.status_code == 200:
             data = response.json()
             st.session_state.session_id = data.get("session_id")
@@ -256,9 +363,16 @@ def start_session_automatically():
                 "route": "conversational",
                 "classification": "conversational",
             })
+            st.success("✅ Session started successfully!")
             return True
 
-        st.error(f"❌ Could not start session: {response.text}")
+        st.error(f"❌ Could not start session: {response.status_code} - {response.text}")
+        return False
+    except requests.exceptions.ConnectionError:
+        st.error("❌ Connection Error: Could not connect to the API. Please check if the backend is running.")
+        return False
+    except requests.exceptions.Timeout:
+        st.error("❌ Timeout: The API request timed out. Please try again.")
         return False
     except Exception as exc:
         st.error(f"❌ Connection error: {exc}")
@@ -300,41 +414,6 @@ def normalize_chat_text(raw_text: str) -> str:
 def escape_message_html(raw_text: str) -> str:
     text = normalize_chat_text(raw_text)
     return text.replace("\n", "<br>")
-
-
-def detect_final_deal_request(text: str) -> bool:
-    normalized = (text or "").lower().strip()
-    triggers = [
-        "book the deal",
-        "book this deal",
-        "book on",
-        "book at",
-        "book for",
-        "okay then book",
-        "okay then finalize",
-        "i am okay with the price",
-        "i am okay with this price",
-        "i am ok with the price",
-        "i am okay with",
-        "i am ok with",
-        "i agree to the price",
-        "i accept the deal",
-        "accept the deal",
-        "confirm the deal",
-        "close the deal",
-        "finalize the deal",
-        "go ahead with the deal",
-        "okay then deal",
-        "book the flat",
-        "book this flat",
-    ]
-    if any(trigger in normalized for trigger in triggers):
-        return True
-    if "book" in normalized and ("lakh" in normalized or "price" in normalized or "deal" in normalized):
-        return True
-    if "okay" in normalized and ("book" in normalized or "deal" in normalized or "price" in normalized):
-        return True
-    return False
 
 
 def last_assistant_text() -> str:
@@ -657,31 +736,49 @@ if st.session_state.started:
 
     if show_final_deal_form:
         st.markdown("### ✅ Final Deal Form")
+        st.info("📝 Please fill in your details to confirm the deal. All fields are required.")
+        
         with st.form("final_deal_form_chat", clear_on_submit=False):
             col1, col2 = st.columns(2)
             with col1:
-                customer_name = st.text_input("Customer Name")
-                customer_email = st.text_input("Email")
-                customer_phone = st.text_input("Contact Number")
+                customer_name = st.text_input("Customer Name *", placeholder="Enter your full name")
+                customer_email = st.text_input("Email *", placeholder="your@email.com")
             with col2:
+                customer_phone = st.text_input("Contact Number *", placeholder="+91 9876543210")
                 project_type = st.text_input("Project Type", value="Construction")
-                final_price = st.number_input("Final Negotiated Price", min_value=0.0, step=1000.0, format="%.2f")
-
-            save_deal_clicked = st.form_submit_button("💾 Save Final Deal", width="stretch")
+            
+            final_price = st.number_input("Final Negotiated Price (₹) *", min_value=0.0, step=1000.0, format="%.2f", value=0.0)
+            
+            col1, col2, col3 = st.columns([1, 1, 1])
+            with col2:
+                save_deal_clicked = st.form_submit_button("💾 Confirm & Save Deal", width="stretch", type="primary")
 
         if save_deal_clicked:
+            errors = []
             if not customer_name.strip():
-                st.error("Please enter the customer name before saving the deal.")
+                errors.append("Customer Name is required")
+            if not customer_email.strip():
+                errors.append("Email is required")
+            elif "@" not in customer_email.strip():
+                errors.append("Please enter a valid email address")
+            if not customer_phone.strip():
+                errors.append("Contact Number is required")
+            if final_price <= 0:
+                errors.append("Please enter a valid price")
+            
+            if errors:
+                for error in errors:
+                    st.error(f"❌ {error}")
             else:
                 payload = {
                     "customer_name": customer_name.strip(),
-                    "customer_email": customer_email.strip() if customer_email.strip() else None,
-                    "customer_phone": customer_phone.strip() if customer_phone.strip() else None,
+                    "customer_email": customer_email.strip(),
+                    "customer_phone": customer_phone.strip(),
                     "project_type": project_type.strip() or "Construction",
                     "project_size": "",
                     "location": "",
-                    "initial_price": float(final_price or 0),
-                    "final_price": float(final_price or 0),
+                    "initial_price": float(final_price),
+                    "final_price": float(final_price),
                     "session_id": st.session_state.session_id or "manual_deal",
                     "negotiation_history": [{
                         "role": "agent",
@@ -690,28 +787,31 @@ if st.session_state.started:
                     }]
                 }
                 try:
-                    response = requests.post(
-                        f"{get_api_base_url()}/api/deal/create",
-                        json=payload,
-                        timeout=15
-                    )
-                    if response.status_code == 200:
-                        result = response.json()
-                        st.session_state.deal_saved_message = (
-                            f"✅ Deal saved successfully for {customer_name.strip()}. "
-                            f"Record ID: {result.get('deal_id')}"
+                    with st.spinner("💾 Saving deal..."):
+                        response = requests.post(
+                            f"{get_api_base_url()}/api/deal/create",
+                            json=payload,
+                            timeout=15
                         )
-                        st.session_state.last_saved_deal = {
-                            "customer_name": customer_name.strip(),
-                            "customer_email": customer_email.strip() if customer_email.strip() else "N/A",
-                            "customer_phone": customer_phone.strip() if customer_phone.strip() else "N/A",
-                            "project_type": project_type.strip() or "Construction",
-                            "final_price": float(final_price or 0),
-                        }
-                        st.session_state.deal_form_open = True
-                        st.success(st.session_state.deal_saved_message)
-                    else:
-                        st.error(f"Deal save failed: {response.text}")
+                        if response.status_code == 200:
+                            result = response.json()
+                            st.session_state.deal_saved_message = (
+                                f"✅ Deal confirmed successfully for {customer_name.strip()}! "
+                                f"Record ID: {result.get('deal_id')}"
+                            )
+                            st.session_state.last_saved_deal = {
+                                "customer_name": customer_name.strip(),
+                                "customer_email": customer_email.strip(),
+                                "customer_phone": customer_phone.strip(),
+                                "project_type": project_type.strip() or "Construction",
+                                "final_price": float(final_price),
+                                "status": "confirmed"
+                            }
+                            st.session_state.deal_form_open = False
+                            st.success(st.session_state.deal_saved_message)
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Deal save failed: {response.text}")
                 except Exception as e:
                     st.error(f"❌ Could not save deal: {e}")
 
@@ -719,11 +819,11 @@ if st.session_state.started:
             st.info(st.session_state.deal_saved_message)
 
         if st.session_state.last_saved_deal:
-            st.markdown("#### 🧾 Last Saved Deal")
+            st.markdown("#### 🧾 Last Confirmed Deal")
             st.json(st.session_state.last_saved_deal)
 
         if st.session_state.saved_deals:
-            st.markdown("#### 📊 Saved Deals Table")
+            st.markdown("#### 📊 All Saved Deals")
             records = []
             for deal in st.session_state.saved_deals:
                 records.append({
@@ -731,7 +831,7 @@ if st.session_state.started:
                     "Email": deal.get("customer_email") or "N/A",
                     "Contact": deal.get("customer_phone") or "N/A",
                     "Project": deal.get("project_type", ""),
-                    "Final Price": deal.get("final_price", 0),
+                    "Price (₹)": deal.get("final_price", 0),
                     "Status": deal.get("status", "pending")
                 })
             st.dataframe(pd.DataFrame(records), width="stretch")
@@ -741,14 +841,12 @@ if st.session_state.started:
         question = st.session_state.quick_question
         st.session_state.quick_question = None
         
-        # Add user message
         st.session_state.messages.append({
             "role": "user",
             "content": normalize_chat_text(question),
             "timestamp": datetime.now().strftime("%H:%M:%S")
         })
         
-        # Process
         with st.spinner("🤔 Thinking..."):
             try:
                 response = requests.post(
@@ -782,8 +880,10 @@ if st.session_state.started:
     prompt = st.chat_input("💬 Ask about construction, flats, pricing...")
     if prompt:
         user_prompt = prompt.strip()
+        
         if detect_final_deal_request(user_prompt):
             st.session_state.deal_form_open = True
+            st.success("✅ Great! Please fill in your details below to confirm the deal.")
         else:
             st.session_state.deal_form_open = False
 
@@ -817,6 +917,9 @@ if st.session_state.started:
                         "route": data.get("route", st.session_state.last_route),
                         "classification": data.get("classification", st.session_state.last_classification),
                     })
+                    
+                    if "deal" in assistant_message.lower() and ("confirm" in assistant_message.lower() or "ready" in assistant_message.lower()):
+                        st.session_state.deal_form_open = True
 
                     st.rerun()
 
@@ -826,7 +929,6 @@ if st.session_state.started:
                 st.error(f"❌ Error: {e}")
 
 else:
-    # Welcome screen when not started
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("""

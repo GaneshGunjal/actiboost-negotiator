@@ -29,7 +29,7 @@ class Deal(Base):
     location = Column(String, nullable=True)
     initial_price = Column(Float, nullable=False)
     final_price = Column(Float, nullable=True)
-    status = Column(String, default="pending")  # pending, approved, rejected, completed
+    status = Column(String, default="pending")
     session_id = Column(String, nullable=True)
     negotiation_history = Column(JSON, default=[])
     approved_by = Column(String, nullable=True)
